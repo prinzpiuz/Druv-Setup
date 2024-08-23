@@ -1,0 +1,4 @@
+*.env
+mybb/
+mariadb/
+postgres/
