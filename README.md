@@ -4,6 +4,6 @@
                         | | | | '__| | | \ \ / / 
                         | |_| | |  | |_| |\ V /  
                         |____/|_|   \__,_| \_/  v3.0 
+                         Setup Scripts For My Media Server
                           
 ```
-This is the 

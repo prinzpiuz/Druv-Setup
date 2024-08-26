@@ -146,6 +146,7 @@ services:
     container_name: recyclarr
     volumes:
       - /configs/recyclarr:/config
+    restart: unless-stopped
     environment:
       CRON_SCHEDULE: "* * * * *"
       TZ: Asia/Kolkata
@@ -222,6 +223,7 @@ services:
       - '8086:8086'
     volumes:
       - /influxdb:/var/lib/influxdb2
+    restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8086/health" ]
       interval: 5s
@@ -234,6 +236,7 @@ services:
       - '8081:8081'
     volumes:
       - /configs/scrutiny:/opt/scrutiny/config
+    restart: unless-stopped
     environment:
       SCRUTINY_WEB_INFLUXDB_HOST: 'scrutiny_influxdb'
     depends_on:
@@ -252,6 +255,7 @@ services:
       - SYS_RAWIO
     volumes:
       - /run/udev:/run/udev:ro
+    restart: unless-stopped
     environment:
       COLLECTOR_API_ENDPOINT: 'http://scrutiny_web:8081'
     depends_on:
