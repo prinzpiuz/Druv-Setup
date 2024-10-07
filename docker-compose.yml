@@ -1,11 +1,44 @@
 version: "3.7"
 services:
-  qbittorrent:
-    container_name: qbittorrent
-    image: ghcr.io/hotio/qbittorrent
-    restart: unless-stopped
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
+    pull_policy: always
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - /configs/gluetun:/gluetun
+    environment:
+      - TZ=Asia/Kolkata
+      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER}
+      - VPN_TYPE=${VPN_TYPE}
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+      - SERVER_CITIES=${SERVER_CITIES}
+      - UPDATER_PERIOD=24h
+    restart: always
     ports:
-      - "8080:8080"
+      - 54509:54509
+      - 54509:54509/udp
+      - 51820:51820
+      - 51820:51820/udp
+      - 8080:8080 # qbittorrent
+      - 9696:9696 # Prowlarr
+      - 9117:9117 # Jackett
+      - 5216:5216 # myspeed
+      - 8000:8000 # gluetun
+      - 5055:5055 # jellyseer
+    networks:
+      arr:
+        ipv4_address: ${GLUETUN_IPV4_ADDR}
+  qbittorrent:
+    image: ghcr.io/hotio/qbittorrent
+    container_name: qbittorrent
+    pull_policy: always
+    restart: always
     environment:
       - PUID=1000
       - PGID=1000
@@ -22,11 +55,14 @@ services:
     volumes:
       - /configs/qbit:/config
       - /data:/data
-    networks:
-      - arr
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
   qbit_manage:
-    container_name: qbit_manage
     image: ghcr.io/stuffanthings/qbit_manage:latest
+    container_name: qbit_manage
+    pull_policy: always
     volumes:
       - /configs/qbit_manage:/config:rw
       - /data:/data:rw
@@ -50,17 +86,18 @@ services:
       - QBT_LOG_LEVEL=INFO
       - QBT_DIVIDER==
       - QBT_WIDTH=100
-    restart: on-failure:2
+    restart: unless-stopped
     depends_on:
       - qbittorrent
     networks:
       - arr
   qbitrr:
     image: feramance/qbitrr:latest
+    container_name: qbitrr
+    pull_policy: always
     user: 1000:1000 # Required to ensure the container is run as the user who has perms to see the 2 mount points and the ability to write to the CompletedDownloadFolder mount
     tty: true # Ensure the output of docker-compose logs qBitrr are properly colored.
     restart: unless-stopped
-    container_name: qbitrr
     environment:
       - TZ=Asia/Kolkata
     volumes:
@@ -78,8 +115,9 @@ services:
     networks:
       - arr
   radarr:
-    container_name: radarr
     image: ghcr.io/hotio/radarr:latest
+    container_name: radarr
+    pull_policy: always
     restart: unless-stopped
     logging:
       driver: json-file
@@ -93,11 +131,15 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /configs/radarr:/config
       - /data:/data
+    depends_on:
+      - gluetun
     networks:
-      - arr
+      arr:
+        ipv4_address: ${RADARR_IPV4_ADDR}
   sonarr:
-    container_name: sonarr
     image: ghcr.io/hotio/sonarr:latest
+    container_name: sonarr
+    pull_policy: always
     restart: unless-stopped
     logging:
       driver: json-file
@@ -111,39 +153,65 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /configs/sonarr:/config
       - /data:/data
+    depends_on:
+      - gluetun
     networks:
-      - arr
+      arr:
+        ipv4_address: ${SONARR_IPV4_ADDR}
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr
+    pull_policy: always
     environment:
       - LOG_LEVEL=info
       - LOG_HTML=false
-      - CAPTCHA_SOLVER=none
       - TZ=Asia/Kolkata
     ports:
       - 8191:8191
     restart: unless-stopped
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
     networks:
-      - arr
+      arr:
+        ipv4_address: ${FLARESOLVERR_IPV4_ADDR}
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: prowlarr
+    pull_policy: always
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=Asia/Kolkata
     volumes:
       - /configs/prowlarr:/config
-    ports:
-      - 9696:9696
     restart: unless-stopped
-    networks:
-      - arr
+    network_mode: service:gluetun
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+    depends_on:
+      gluetun:
+        condition: service_healthy
+  jackett:
+    image: lscr.io/linuxserver/jackett:latest
+    container_name: jackett
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - AUTO_UPDATE=true
+    network_mode: service:gluetun
+    volumes:
+      - /configs/jackett:/config
+      - /data:/downloads
+    restart: unless-stopped
+    depends_on:
+      gluetun:
+        condition: service_healthy
   recyclarr:
     image: ghcr.io/recyclarr/recyclarr:latest
-    user: 1000:1000
     container_name: recyclarr
+    pull_policy: always
+    user: 1000:1000
     volumes:
       - /configs/recyclarr:/config
     restart: unless-stopped
@@ -153,8 +221,9 @@ services:
     networks:
       - arr
   bazarr:
-    container_name: bazarr
     image: ghcr.io/hotio/bazarr:latest
+    container_name: bazarr
+    pull_policy: always
     restart: unless-stopped
     logging:
       driver: json-file
@@ -168,39 +237,49 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /configs/bazarr:/config
       - /data/media:/data/media
+    depends_on:
+      gluetun:
+        condition: service_healthy
     networks:
-      - arr
-  jellyfin:
-    image: jellyfin/jellyfin
-    container_name: jellyfin
-    user: 1000:1000
-    network_mode: host
+      arr:
+        ipv4_address: ${BAZARR_IPV4_ADDR}
+  emby:
+    image: emby/embyserver
+    container_name: emby
+    pull_policy: always
+    environment:
+      - UID=1000
+      - GID=1000
+      - TZ=Asia/Kolkata
     volumes:
-      - /configs/jellyfin:/config
-      - /jellyfin_cache:/cache
-      - type: bind
-        source: /data/media
-        target: /media
+      - /configs/emby:/config
+      - /data/media:/media
+    ports:
+      - 8096:8096
     restart: unless-stopped
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
+    networks:
+      arr:
+        ipv4_address: ${JELLYFIN_IPV4_ADDR}
   jellyseerr:
     image: fallenbagel/jellyseerr:latest
     container_name: jellyseerr
+    pull_policy: always
     user: 1000:1000
     environment:
       - LOG_LEVEL=debug
       - TZ=Asia/Kolkata
-    ports:
-      - 5055:5055
+      - JELLYFIN_TYPE=emby
     volumes:
       - /configs/jellyseerr:/app/config
-    restart: unless-stopped
-    networks:
-      - arr
+    restart: always
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
   unpackerr:
     image: golift/unpackerr
     container_name: unpackerr
+    pull_policy: always
     volumes:
       - /data:/downloads
     restart: always
@@ -208,19 +287,20 @@ services:
     environment:
       - TZ=Asia/Kolkata
       - UN_LOG_FILE=/downloads/unpackerr.log
-      - UN_SONARR_0_URL=http://192.168.2.154:8989
-      - UN_SONARR_0_API_KEY=517ad724ae8a45b18e3c637538b70c02
-      - UN_RADARR_0_URL=http://192.168.2.154:7878
-      - UN_RADARR_0_API_KEY=d171c00a200f49a282a3f9b2e4c8a8ba
+      - UN_SONARR_0_URL=http://${SONARR_IPV4_ADDR}:8989
+      - UN_SONARR_0_API_KEY=${SONARR_API_KEY}
+      - UN_RADARR_0_URL=http://${RADARR_IPV4_ADDR}:7878
+      - UN_RADARR_0_API_KEY=${RADARR_API_KEY}
     security_opt:
       - no-new-privileges:true
     networks:
       - arr
   scrutiny_influxdb:
-    container_name: scrutiny_influxdb
     image: influxdb:2.2
+    container_name: scrutiny_influxdb
+    pull_policy: always
     ports:
-      - '8086:8086'
+      - 8086:8086
     volumes:
       - /influxdb:/var/lib/influxdb2
     restart: unless-stopped
@@ -230,15 +310,16 @@ services:
       timeout: 10s
       retries: 20
   scrutiny_web:
-    container_name: scrutiny_web
     image: ghcr.io/analogj/scrutiny:master-web
+    container_name: scrutiny_web
+    pull_policy: always
     ports:
-      - '8081:8081'
+      - 8081:8081
     volumes:
       - /configs/scrutiny:/opt/scrutiny/config
     restart: unless-stopped
     environment:
-      SCRUTINY_WEB_INFLUXDB_HOST: 'scrutiny_influxdb'
+      SCRUTINY_WEB_INFLUXDB_HOST: scrutiny_influxdb
     depends_on:
       scrutiny_influxdb:
         condition: service_healthy
@@ -249,15 +330,16 @@ services:
       retries: 20
       start_period: 10s
   scrutiny_collector:
-    container_name: scrutiny_collector
     image: ghcr.io/analogj/scrutiny:master-collector
+    container_name: scrutiny_collector
+    pull_policy: always
     cap_add:
       - SYS_RAWIO
     volumes:
       - /run/udev:/run/udev:ro
     restart: unless-stopped
     environment:
-      COLLECTOR_API_ENDPOINT: 'http://scrutiny_web:8081'
+      COLLECTOR_API_ENDPOINT: http://scrutiny_web:8081
     depends_on:
       scrutiny_web:
         condition: service_healthy
@@ -266,6 +348,7 @@ services:
   dockerproxy:
     image: ghcr.io/tecnativa/docker-socket-proxy:latest
     container_name: dockerproxy
+    pull_policy: always
     environment:
       - CONTAINERS=1 # Allow access to viewing containers
       - SERVICES=1 # Allow access to viewing services (necessary when using Docker Swarm)
@@ -281,6 +364,7 @@ services:
   homepage:
     image: ghcr.io/gethomepage/homepage:latest
     container_name: homepage
+    pull_policy: always
     environment:
       PUID: 1000
       PGID: 1000
@@ -293,14 +377,15 @@ services:
       - arr
   myspeed:
     image: germannewsmaker/myspeed
-    container_name: MySpeed
-    ports:
-      - 5216:5216
+    container_name: mySpeed
+    pull_policy: always
     volumes:
       - /configs/myspeed:/myspeed/data
     restart: unless-stopped
-    networks:
-      - arr
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
 
 networks:
   arr:
